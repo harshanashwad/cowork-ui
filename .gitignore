@@ -1,0 +1,25 @@
+# Python
+backend/.venv/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+
+# Scratch scripts write test files here — not source, not runtime data.
+backend/scratch/probe_workdir/
+
+# Per-session deck working directories — these get their own git history
+# (version history for the artifact), not tracked by the project's repo.
+backend/workdirs/*
+!backend/workdirs/.gitkeep
+
+# Env / secrets
+.env
+backend/.env
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+
+# Editor / OS
+.DS_Store
+.vscode/
