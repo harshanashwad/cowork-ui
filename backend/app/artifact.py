@@ -46,6 +46,29 @@ def commit(directory: Path, message: str) -> None:
         raise RuntimeError(f"git commit failed:\n{result.stdout}{result.stderr}")
 
 
+def log(directory: Path) -> list[dict[str, str]]:
+    """This deck's whole commit history, most recent first — no per-slide detail."""
+    result = subprocess.run(
+        ["git", "log", "--pretty=format:%H%x1f%s"],
+        cwd=directory, capture_output=True, text=True, check=True,
+    )
+    entries = []
+    for line in result.stdout.splitlines():
+        commit_hash, message = line.split("\x1f", 1)
+        entries.append({"hash": commit_hash, "message": message})
+    return entries
+
+
+def revert_to(directory: Path, commit_hash: str) -> None:
+    """
+    Restores the whole deck file to its state at commit_hash and records
+    that as a new commit — a forward-moving revert, not history rewriting,
+    consistent with how every other change here gets recorded.
+    """
+    _git(["checkout", commit_hash, "--", DECK_FILENAME], directory)
+    commit(directory, f"Revert to {commit_hash[:7]}")
+
+
 def _git(args: list[str], cwd: Path) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
 

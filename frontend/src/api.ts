@@ -50,3 +50,42 @@ export async function uploadFile(sessionId: string, file: File): Promise<{ filen
   }
   return response.json();
 }
+
+export interface HistoryEntry {
+  hash: string;
+  message: string;
+}
+
+export async function getHistory(sessionId: string): Promise<HistoryEntry[]> {
+  // GET /api/sessions/{id}/history -> this deck's whole commit history,
+  // most recent first, for the version history sidebar.
+  const response = await fetch(`/api/sessions/${sessionId}/history`);
+  if (!response.ok) {
+    throw new Error(`failed to load history: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function revertTo(sessionId: string, commit: string): Promise<{ filenames: string[] }> {
+  // POST /api/sessions/{id}/revert -> git checkout <commit> -- slides.md,
+  // committed as a new "Revert to ..." entry (never rewrites history).
+  const response = await fetch(`/api/sessions/${sessionId}/revert`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ commit }),
+  });
+  if (!response.ok) {
+    throw new Error(`failed to revert: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function getThumbnails(sessionId: string): Promise<{ filenames: string[] }> {
+  // GET /api/sessions/{id}/thumbnails -> re-renders the current on-disk
+  // deck and returns the resulting filenames, for the thumbnail rail.
+  const response = await fetch(`/api/sessions/${sessionId}/thumbnails`);
+  if (!response.ok) {
+    throw new Error(`failed to load thumbnails: ${response.status}`);
+  }
+  return response.json();
+}

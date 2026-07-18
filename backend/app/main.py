@@ -4,7 +4,9 @@ process lifetime, and exposes the one REST route (create a session) plus
 the websocket route that does everything else.
 """
 
+import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -68,6 +70,46 @@ async def get_session_messages(session_id: str) -> list[dict]:
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
     return await app.state.client.get_messages(session_id, session.directory)
+
+
+@app.get("/api/sessions/{session_id}/history")
+async def get_history(session_id: str) -> list[dict[str, str]]:
+    # Whole-deck commit history for the version history sidebar — no
+    # per-slide detail, just the flat commit list, most recent first.
+    session = app.state.sessions.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return await asyncio.to_thread(artifact.log, session.directory)
+
+
+class RevertIn(BaseModel):
+    commit: str
+
+
+@app.post("/api/sessions/{session_id}/revert")
+async def revert_session(session_id: str, body: RevertIn) -> dict[str, list[str]]:
+    session = app.state.sessions.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    await asyncio.to_thread(artifact.revert_to, session.directory, body.commit)
+    filenames = await asyncio.to_thread(_render_current, session.directory)
+    return {"filenames": filenames}
+
+
+@app.get("/api/sessions/{session_id}/thumbnails")
+async def get_thumbnails(session_id: str) -> dict[str, list[str]]:
+    # Always re-renders the current on-disk deck rather than tracking
+    # render state separately — one source of truth (the file itself),
+    # nothing that can drift out of sync after an approve/reject/revert.
+    session = app.state.sessions.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    filenames = await asyncio.to_thread(_render_current, session.directory)
+    return {"filenames": filenames}
+
+
+def _render_current(directory: Path) -> list[str]:
+    return [p.name for p in artifact.render_deck(directory)]
 
 
 @app.post("/api/sessions/{session_id}/upload")
