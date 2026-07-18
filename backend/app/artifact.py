@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 DECK_FILENAME = "slides.md"
+DECK_COPY_FILENAME = "slides_copy.md"  # scratch draft an agent's turn edits freely; see ws.py
 RENDER_DIRNAME = ".render"  # generated thumbnails — not part of the deck's own history
 
 # Frontmatter is itself delimited by "---", so it has to be peeled off
@@ -23,7 +24,10 @@ def init_repo(directory: Path) -> None:
     # Turns a session's directory into its own git repo, if it isn't one yet.
     if (directory / ".git").exists():
         return
-    (directory / ".gitignore").write_text(f"{RENDER_DIRNAME}/\n") # generated thumbnails aren't real deck content
+    # Generated thumbnails and the in-progress scratch draft aren't real deck
+    # content — the draft only ever gets into the real history by being
+    # merged over slides.md (see ws.py's approval flow), never committed itself.
+    (directory / ".gitignore").write_text(f"{RENDER_DIRNAME}/\n{DECK_COPY_FILENAME}\n")
     _git(["init"], directory)
     _git(["config", "user.email", "cowork-ui@local"], directory)
     _git(["config", "user.name", "cowork-ui"], directory)
@@ -61,12 +65,19 @@ def parse_deck(markdown: str) -> tuple[str, list[str]]:
 
 # --- rendering ---------------------------------------------------------------
 
-def render_deck(directory: Path, deck_filename: str = DECK_FILENAME) -> list[Path]:
-    """Renders every slide in the deck to its own PNG, returned in slide order."""
+def render_deck(
+    directory: Path, deck_filename: str = DECK_FILENAME, output_prefix: str = "slide"
+) -> list[Path]:
+    """
+    Renders every slide in the deck to its own PNG, returned in slide order.
+    output_prefix lets a caller render two different versions of a deck
+    (e.g. "before" and "after") into the same directory without one
+    overwriting the other.
+    """
     render_dir = directory / RENDER_DIRNAME
     render_dir.mkdir(exist_ok=True)
-    _run_marp(directory / deck_filename, render_dir / "slide.png", cwd=directory)
-    return sorted(render_dir.glob("slide.*.png"), key=_slide_number)
+    _run_marp(directory / deck_filename, render_dir / f"{output_prefix}.png", cwd=directory)
+    return sorted(render_dir.glob(f"{output_prefix}.*.png"), key=_slide_number)
 
 
 def _run_marp(source: Path, output: Path, cwd: Path) -> None:

@@ -72,15 +72,34 @@ class OpenCodeClient:
         return response.json()
 
     async def send_message(
-        self, session_id: str, directory: Path, text: str, model: dict[str, str]
+        self,
+        session_id: str,
+        directory: Path,
+        text: str,
+        model: dict[str, str],
+        system: str | None = None,
     ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "model": model,
+            "parts": [{"type": "text", "text": text}],
+        }
+        if system is not None:
+            body["system"] = system
         response = await self._http.post(
             f"/session/{session_id}/message",
             params={"directory": str(directory)},
-            json={
-                "model": model,
-                "parts": [{"type": "text", "text": text}],
-            },
+            json=body,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def get_messages(self, session_id: str, directory: Path) -> list[dict[str, Any]]:
+        # Full message history for the session — [{info: {...}, parts: [...]}].
+        # Used to replay a session's transcript when a client reconnects to
+        # it instead of starting from a blank chat.
+        response = await self._http.get(
+            f"/session/{session_id}/message",
+            params={"directory": str(directory)},
         )
         response.raise_for_status()
         return response.json()
