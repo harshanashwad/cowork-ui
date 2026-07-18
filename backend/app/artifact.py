@@ -1,8 +1,8 @@
 """
 Everything that treats a session's working directory as a slide deck:
-git-backed version history, rendering slides to images via Marp, and
-figuring out which slide(s) a given edit touched. Nothing here talks to
-OpenCode — it only operates on files already sitting in a directory.
+git-backed version history and rendering slides to images via Marp.
+Nothing here talks to OpenCode — it only operates on files already
+sitting in a directory.
 """
 
 import re
@@ -20,14 +20,14 @@ _FRONTMATTER_RE = re.compile(r"(?s)^---\s*\n(.*?)\n---\s*\n(.*)$")
 # --- version history -------------------------------------------------------
 
 def init_repo(directory: Path) -> None:
-    """Turns a session's directory into its own git repo, if it isn't one yet."""
+    # Turns a session's directory into its own git repo, if it isn't one yet.
     if (directory / ".git").exists():
         return
-    (directory / ".gitignore").write_text(f"{RENDER_DIRNAME}/\n.preview-*.md\n")
+    (directory / ".gitignore").write_text(f"{RENDER_DIRNAME}/\n") # generated thumbnails aren't real deck content
     _git(["init"], directory)
     _git(["config", "user.email", "cowork-ui@local"], directory)
     _git(["config", "user.name", "cowork-ui"], directory)
-    commit(directory, "Initial deck")
+    commit(directory, "Initial deck") # baseline snapshot of the deck
 
 
 def commit(directory: Path, message: str) -> None:
@@ -50,24 +50,13 @@ def _git(args: list[str], cwd: Path) -> None:
 
 def parse_deck(markdown: str) -> tuple[str, list[str]]:
     """Splits a Marp deck into its frontmatter and a list of slide bodies."""
+    # Peeling off frontmatter (first two '---' and the content wrapped in it)
     match = _FRONTMATTER_RE.match(markdown)
     if not match:
         raise ValueError("deck is missing Marp frontmatter ('--- ... ---' at the top)")
-    frontmatter, body = match.groups()
-    slides = re.split(r"(?m)^---\s*$", body)
-    return frontmatter, [slide.strip() for slide in slides]
-
-
-def affected_slides(old_markdown: str, new_markdown: str) -> list[int]:
-    """0-based indices of every slide whose content differs between two deck versions."""
-    _, old_slides = parse_deck(old_markdown)
-    _, new_slides = parse_deck(new_markdown)
-    count = max(len(old_slides), len(new_slides))
-    return [
-        i for i in range(count)
-        if (old_slides[i] if i < len(old_slides) else None)
-        != (new_slides[i] if i < len(new_slides) else None)
-    ]
+    frontmatter, body = match.groups() # body is remaining content in the markdown after frontmatter
+    slides = re.split(r"(?m)^---\s*$", body) # split on '---' markers to get slides
+    return frontmatter, [slide.strip() for slide in slides] # return frontmatter and list of slide texts
 
 
 # --- rendering ---------------------------------------------------------------
@@ -80,29 +69,14 @@ def render_deck(directory: Path, deck_filename: str = DECK_FILENAME) -> list[Pat
     return sorted(render_dir.glob("slide.*.png"), key=_slide_number)
 
 
-def render_slide_preview(
-    directory: Path, frontmatter: str, slide_markdown: str, name: str
-) -> Path:
-    """
-    Renders one slide's markdown, with the deck's own frontmatter reattached,
-    to a single PNG. Used to show a slide's before/after state for approval
-    without touching the real deck file.
-    """
-    # Written into the deck's own directory (not .render/) so any relative
-    # asset paths the slide references — e.g. an image — still resolve.
-    source = directory / f".preview-{name}.md"
-    source.write_text(f"---\n{frontmatter}\n---\n\n{slide_markdown}\n")
-    try:
-        render_dir = directory / RENDER_DIRNAME
-        render_dir.mkdir(exist_ok=True)
-        output = render_dir / f"{name}.png"
-        _run_marp(source, output, cwd=directory)
-        return render_dir / f"{name}.001.png"
-    finally:
-        source.unlink()
-
-
 def _run_marp(source: Path, output: Path, cwd: Path) -> None:
+    '''
+    the subprocess is equivalent to running the following command:
+    marp slides.md --images png -o .render/slide.png --allow-local-files
+    
+    --images png — tells Marp to render each slide as a separate PNG (as opposed to one combined PDF/HTML)
+    --allow-local-files — lets Marp load local image assets (like assets/chart.png) that the deck's markdown references — without this flag Marp blocks local file access for security reasons by default
+    '''
     result = subprocess.run(
         [
             "marp", str(source.relative_to(cwd)),
