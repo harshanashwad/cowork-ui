@@ -1,1 +1,26 @@
+@import url("https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap");
 @import "tailwindcss";
+
+/*
+Warm neutral palette + a serif for assistant prose, modeled on a
+Claude-cowork-style look: light, minimal, restrained clay accent instead
+of a saturated brand color. Tailwind v4 turns each of these into a
+utility class automatically (bg-canvas, text-muted, border-border, etc).
+*/
+@theme {
+  --color-canvas: #faf9f5;
+  --color-surface: #f4f2ec;
+  --color-surface-hover: #ece8de;
+  --color-border: #e5e1d6;
+  --color-ink: #2b2a26;
+  --color-muted: #8b8778;
+  --color-accent: #cc6b49;
+  --color-accent-hover: #b85d3e;
+
+  --font-serif: "Source Serif 4", Georgia, serif;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+}
