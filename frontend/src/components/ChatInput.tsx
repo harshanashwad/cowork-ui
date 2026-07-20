@@ -14,11 +14,13 @@ import { FileIcon, PaperclipIcon, SendIcon, XIcon } from "./icons";
 export function ChatInput({
   sessionId,
   onSend,
+  onDeckUploadStart,
   onDeckImported,
   disabled,
 }: {
   sessionId: string;
   onSend: (text: string, attachments: string[]) => void;
+  onDeckUploadStart: () => void;
   onDeckImported: () => void;
   disabled: boolean;
 }) {
@@ -53,6 +55,7 @@ export function ChatInput({
     if (!file) return;
 
     const isDeck = file.name.toLowerCase().endsWith(".pptx");
+    if (isDeck) onDeckUploadStart(); // fires immediately, before the request even lands
     const { filename } = await uploadFile(sessionId, file);
     if (isDeck) {
       onDeckImported();
@@ -62,7 +65,11 @@ export function ChatInput({
   };
 
   return (
-    <div className="rounded-3xl border border-border bg-white px-4 pb-2.5 pt-3.5 shadow-sm">
+    <div
+      className={`rounded-3xl border border-border px-4 pb-2.5 pt-3.5 shadow-sm transition-colors ${
+        disabled ? "bg-surface" : "bg-white"
+      }`}
+    >
       {attachments.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2">
           {attachments.map((name) => (

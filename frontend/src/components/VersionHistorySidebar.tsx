@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { getHistory, revertTo, type HistoryEntry } from "../api";
-import { ChevronRightIcon } from "./icons";
+import { getHistory, hideHistoryEntry, revertTo, type HistoryEntry } from "../api";
+import { ChevronRightIcon, HistoryIcon } from "./icons";
 
 // Whole-deck commit history only — no per-slide detail anywhere here.
 // Revert restores the whole file to a past commit and records that as a
@@ -38,6 +38,15 @@ export function VersionHistorySidebar({
     }
   };
 
+  const handleHide = async (hash: string) => {
+    // Optimistic: drop it from the visible list right away rather than
+    // waiting on a refetch — the backend filter (session.hidden_commits)
+    // is already updated by the time this resolves, so a later refresh
+    // (refreshKey bump) would agree anyway.
+    await hideHistoryEntry(sessionId, hash);
+    setEntries((prev) => prev.filter((entry) => entry.hash !== hash));
+  };
+
   return (
     <aside
       className={`flex h-full flex-col border-l border-border bg-canvas transition-all duration-200 ${
@@ -47,10 +56,19 @@ export function VersionHistorySidebar({
       <button
         onClick={onToggleCollapsed}
         className="flex items-center gap-1.5 px-3 py-4 text-xs font-medium text-muted hover:text-ink"
+        aria-label="Toggle version history"
       >
-        {/* Points left (toward the panel) when collapsed, right when open */}
-        <ChevronRightIcon expanded={collapsed} />
-        {!collapsed && "Version history"}
+        {/* The clock is the "what this button is" affordance, kept visible
+            collapsed too. The chevron only joins it expanded — collapsed,
+            the narrow w-11 rail doesn't have room for both without
+            overflowing. */}
+        <HistoryIcon className="h-4 w-4 shrink-0" />
+        {!collapsed && (
+          <>
+            <ChevronRightIcon expanded={collapsed} className="h-4 w-4 shrink-0" />
+            Version history
+          </>
+        )}
       </button>
 
       {!collapsed && (
@@ -63,13 +81,22 @@ export function VersionHistorySidebar({
                 {index === 0 ? (
                   <span className="text-xs text-muted">Current</span>
                 ) : (
-                  <button
-                    onClick={() => handleRevert(entry.hash)}
-                    disabled={reverting !== null}
-                    className="text-xs font-medium text-accent hover:text-accent-hover disabled:opacity-50"
-                  >
-                    {reverting === entry.hash ? "Reverting..." : "Revert to here"}
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => handleRevert(entry.hash)}
+                      disabled={reverting !== null}
+                      className="text-xs font-medium text-accent hover:text-accent-hover disabled:opacity-50"
+                    >
+                      {reverting === entry.hash ? "Reverting..." : "Revert to here"}
+                    </button>
+                    <button
+                      onClick={() => handleHide(entry.hash)}
+                      disabled={reverting !== null}
+                      className="text-xs font-medium text-muted hover:text-ink disabled:opacity-50"
+                    >
+                      Hide
+                    </button>
+                  </div>
                 )}
               </div>
             </div>

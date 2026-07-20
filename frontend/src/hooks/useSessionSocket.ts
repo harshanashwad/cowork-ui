@@ -26,6 +26,17 @@ export type FeedEntry =
   | { kind: "text"; id: string; role: "user" | "assistant"; text: string; attachments?: string[] }
   | { kind: "status"; id: string; text: string }
   | {
+      // A bash/read/write/edit tool call. Kept structured (not a
+      // pre-formatted string, unlike "status") so ActivityFeed can render
+      // it as a collapsible card — the raw command/file path is useful to
+      // an interested user, but clutters the feed by default.
+      kind: "tool";
+      id: string;
+      tool: string;
+      target: string;
+      status: string;
+    }
+  | {
       kind: "permission";
       id: string;
       requestId: string;
@@ -193,7 +204,13 @@ function handleEvent(
         attachments,
       });
     } else if (part.type === "tool") {
-      upsert(setEntries, part.id, { kind: "status", id: part.id, text: describeTool(part) });
+      upsert(setEntries, part.id, {
+        kind: "tool",
+        id: part.id,
+        tool: part.tool,
+        target: part.state?.input?.filePath ?? part.state?.input?.command ?? "",
+        status: part.state?.status ?? "",
+      });
     }
     return;
   }
@@ -332,16 +349,3 @@ function upsert(
   });
 }
 
-const TOOL_VERBS: Record<string, string> = {
-  read: "Reading",
-  write: "Editing",
-  edit: "Editing",
-  bash: "Running",
-};
-
-function describeTool(part: any): string {
-  const verb = TOOL_VERBS[part.tool] ?? part.tool;
-  const target = part.state?.input?.filePath ?? part.state?.input?.command ?? "";
-  const status = part.state?.status ?? "";
-  return `${verb} ${target} (${status})`.trim();
-}

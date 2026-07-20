@@ -18,6 +18,7 @@ interruptions.
 """
 
 import asyncio
+import re
 import shutil
 from pathlib import Path
 
@@ -54,8 +55,19 @@ SYSTEM_PROMPT = (
     f"slide is empty without checking. When passing position/size to python-pptx (e.g. "
     f"shapes.add_chart's x, y, cx, cy), always wrap the inch values with "
     f"`from pptx.util import Inches; Inches(1.0)` — never pass raw numbers, since "
-    f"python-pptx expects EMU integers there and a raw float silently corrupts the file."
+    f"python-pptx expects EMU integers there and a raw float silently corrupts the file.\n\n"
+    f"When you finish making changes this turn, end your reply with one line in exactly "
+    f"this format, on its own line after your normal explanation — it becomes the git "
+    f"commit message for your changes, so keep it short and specific to what you actually "
+    f"did:\n"
+    f"Summary: <short description>\n"
+    f'e.g. "Summary: Added a bar chart to slide 3" or "Summary: Reworded the title on '
+    f'slide 1". If you made no changes this turn, omit this line entirely.'
 )
+
+COMMIT_SUMMARY_PATTERN = re.compile(r"^Summary:\s*(.+)$", re.MULTILINE | re.IGNORECASE)
+FALLBACK_COMMIT_MESSAGE = "Approved turn"
+COMMIT_SUBJECT_MAX_LEN = 72
 
 
 @router.websocket("/ws/{session_id}")
@@ -141,6 +153,11 @@ async def session_socket(websocket: WebSocket, session_id: str) -> None:
             # this) and let the client retry the render alone via
             # "retry_render" instead of re-running the whole turn.
             review_id = f"review_{result['info']['id']}"
+            # Set once, from the agent's own reply, regardless of whether
+            # rendering below succeeds on the first try or needs a
+            # retry_render — a render retry shouldn't lose the summary any
+            # more than it should lose the edit itself.
+            session.pending_commit_message = _extract_commit_message(result)
             try:
                 before, after = await asyncio.to_thread(_render_turn, session.directory, review_id)
             except Exception as exc:
@@ -167,6 +184,7 @@ async def session_socket(websocket: WebSocket, session_id: str) -> None:
             session.busy = False
             session.pending_review = None
             session.pending_preview = None
+            session.pending_commit_message = None
             session.render_error = None
             await websocket.send_json({"type": "turn.failed", "error": str(exc)})
 
@@ -203,9 +221,14 @@ async def session_socket(websocket: WebSocket, session_id: str) -> None:
             elif action == "permission_reply":
                 request_id = data["request_id"]
                 if request_id == session.pending_review:
-                    await _resolve_turn(session, review_id=request_id, reply=data["reply"], websocket=websocket)
+                    commit_message = session.pending_commit_message or FALLBACK_COMMIT_MESSAGE
+                    await _resolve_turn(
+                        session, review_id=request_id, reply=data["reply"],
+                        websocket=websocket, commit_message=commit_message,
+                    )
                     session.pending_review = None
                     session.pending_preview = None
+                    session.pending_commit_message = None
                     session.busy = False
                 else:
                     # A real OpenCode permission — none currently ask by
@@ -243,6 +266,30 @@ def _files_equal(a: Path, b: Path) -> bool:
     return a.read_bytes() == b.read_bytes()
 
 
+def _extract_commit_message(result: dict) -> str:
+    """
+    Pulls the "Summary: ..." line the system prompt asks the agent to end
+    its reply with, for use as the commit message on an approved turn —
+    a real, specific description of the edit instead of a generic
+    "Approved turn" every time. Falls back to that generic message if the
+    agent's reply doesn't contain one (shouldn't happen once the prompt
+    change lands, but this must never fail the commit over a formatting
+    slip).
+    """
+    text = "\n".join(
+        part.get("text", "") for part in result.get("parts", []) if part.get("type") == "text"
+    )
+    matches = COMMIT_SUMMARY_PATTERN.findall(text)
+    if not matches:
+        return FALLBACK_COMMIT_MESSAGE
+    summary = matches[-1].strip()  # last match: the agent's actual final line, not an example
+    if not summary:
+        return FALLBACK_COMMIT_MESSAGE
+    if len(summary) > COMMIT_SUBJECT_MAX_LEN:
+        summary = summary[: COMMIT_SUBJECT_MAX_LEN - 1].rstrip() + "…"
+    return summary
+
+
 def _review_event(review_id: str, preview: dict[str, list[str]]) -> dict:
     return {
         "type": "turn.review",
@@ -276,7 +323,9 @@ def _render_turn(directory: Path, review_id: str) -> tuple[list[str], list[str]]
     return before, after
 
 
-async def _resolve_turn(session: Session, review_id: str, reply: str, websocket: WebSocket) -> None:
+async def _resolve_turn(
+    session: Session, review_id: str, reply: str, websocket: WebSocket, commit_message: str
+) -> None:
     deck_path = session.directory / artifact.DECK_FILENAME
     copy_path = session.directory / artifact.DECK_COPY_FILENAME
 
@@ -285,7 +334,7 @@ async def _resolve_turn(session: Session, review_id: str, reply: str, websocket:
         await asyncio.to_thread(copy_path.unlink, missing_ok=True)
     else:
         await asyncio.to_thread(shutil.move, copy_path, deck_path)
-        await asyncio.to_thread(artifact.commit, session.directory, "Approved turn")
+        await asyncio.to_thread(artifact.commit, session.directory, commit_message)
 
     # Mirrors OpenCode's own permission.replied shape so the frontend's
     # existing resolved-state handling works unchanged for this synthetic

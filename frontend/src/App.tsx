@@ -30,6 +30,15 @@ function App() {
     });
   }
 
+  function handleSessionDeleted(deletedId: string) {
+    setSessionListVersion((v) => v + 1);
+    // If the deleted session was the one on screen, it needs to be
+    // replaced with something — there's no "no session" state in this app.
+    if (deletedId === sessionId) {
+      startNewSession();
+    }
+  }
+
   if (!sessionId) {
     return (
       <div className="flex h-screen items-center justify-center bg-canvas text-sm text-muted">
@@ -46,6 +55,7 @@ function App() {
         activeSessionId={sessionId}
         onSelectSession={setSessionId}
         onNewSession={startNewSession}
+        onSessionDeleted={handleSessionDeleted}
         refreshKey={sessionListVersion}
       />
       {/* Keyed by sessionId: switching sessions unmounts/remounts this
@@ -64,6 +74,10 @@ function ChatSession({ sessionId }: { sessionId: string }) {
   // Bumped after an approved turn or a revert, so the thumbnail rail
   // re-renders the current deck instead of showing stale slides.
   const [deckVersion, setDeckVersion] = useState(0);
+  // Set the instant a .pptx is picked, cleared once SlideThumbnailRail's
+  // own fetch (triggered by the deckVersion bump below) resolves — spans
+  // the upload request itself plus the first-render cost after it.
+  const [deckUploading, setDeckUploading] = useState(false);
 
   const approvedCount = entries.filter((e) => e.kind === "permission" && e.resolved === "once").length;
   useEffect(() => {
@@ -84,7 +98,12 @@ function ChatSession({ sessionId }: { sessionId: string }) {
   return (
     <>
       <main className="flex min-w-0 flex-1 flex-col">
-        <SlideThumbnailRail sessionId={sessionId} refreshKey={deckVersion} />
+        <SlideThumbnailRail
+          sessionId={sessionId}
+          refreshKey={deckVersion}
+          uploading={deckUploading}
+          onUploadSettled={() => setDeckUploading(false)}
+        />
         <div className="min-h-0 flex-1 overflow-y-auto">
           <ActivityFeed
             sessionId={sessionId}
@@ -93,12 +112,14 @@ function ChatSession({ sessionId }: { sessionId: string }) {
             onReplyQuestion={replyQuestion}
             onRejectQuestion={rejectQuestion}
             onRetryRender={retryRender}
+            showTyping={busy && !hasPendingApproval}
           />
         </div>
         <div className="mx-auto w-full max-w-3xl px-6 pb-6">
           <ChatInput
             sessionId={sessionId}
             onSend={sendMessage}
+            onDeckUploadStart={() => setDeckUploading(true)}
             onDeckImported={() => setDeckVersion((v) => v + 1)}
             disabled={busy || hasPendingApproval}
           />

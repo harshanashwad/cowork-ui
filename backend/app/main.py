@@ -63,6 +63,20 @@ async def list_sessions() -> list[SessionOut]:
     ]
 
 
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str) -> dict[str, bool]:
+    session = app.state.sessions.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if session.busy:
+        # Deleting mid-turn would remove the working directory a live bash
+        # command or render step is still using — refuse rather than race it.
+        raise HTTPException(status_code=409, detail="a turn is in progress for this session")
+    app.state.bridge.stop_session(session_id)
+    app.state.sessions.delete(session_id)
+    return {"ok": True}
+
+
 @app.get("/api/sessions/{session_id}/messages")
 async def get_session_messages(session_id: str) -> list[dict]:
     # Raw OpenCode message history — the frontend replays it through the
@@ -78,10 +92,29 @@ async def get_session_messages(session_id: str) -> list[dict]:
 async def get_history(session_id: str) -> list[dict[str, str]]:
     # Whole-deck commit history for the version history sidebar — no
     # per-slide detail, just the flat commit list, most recent first.
+    # Hidden commits (see the /hide endpoint below) are filtered out here,
+    # not in git itself — the real history is untouched.
     session = app.state.sessions.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
-    return await asyncio.to_thread(artifact.log, session.directory)
+    entries = await asyncio.to_thread(artifact.log, session.directory)
+    return [e for e in entries if e["hash"] not in session.hidden_commits]
+
+
+@app.post("/api/sessions/{session_id}/history/{commit_hash}/hide")
+async def hide_history_entry(session_id: str, commit_hash: str) -> dict[str, bool]:
+    # Purely a display filter (see Session.hidden_commits) — nothing in git
+    # is rewritten or deleted. The current commit can't be hidden: it's the
+    # sidebar's only "you are here" reference point, and with no visible
+    # entry left at index 0 the frontend would have nothing to label "Current".
+    session = app.state.sessions.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    entries = await asyncio.to_thread(artifact.log, session.directory)
+    if entries and entries[0]["hash"] == commit_hash:
+        raise HTTPException(status_code=400, detail="can't hide the current commit")
+    session.hidden_commits.add(commit_hash)
+    return {"ok": True}
 
 
 class RevertIn(BaseModel):

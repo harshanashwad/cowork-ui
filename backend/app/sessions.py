@@ -4,7 +4,7 @@ Core purpose: Maintain a in-memory registry of our opencode sessions
 
 import shutil
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from app import artifact
@@ -52,6 +52,18 @@ class Session:
     pending_review: str | None = None
     pending_preview: dict[str, list[str]] | None = None
     render_error: dict[str, str] | None = None
+    # The commit message for the currently pending review, parsed from the
+    # agent's own final reply (see ws.py's SYSTEM_PROMPT/_extract_commit_message).
+    # Set once the agent's message result comes back, independent of whether
+    # rendering succeeds on the first try or needs a retry_render — so a
+    # retry doesn't lose the summary the same way it doesn't lose the edit.
+    pending_commit_message: str | None = None
+
+    # Commits "deleted" from the version history sidebar. This is a display
+    # filter only — git history itself is never rewritten (dropping a commit
+    # from the middle of the chain would change every later commit's hash,
+    # real risk for no real benefit here). See main.py's hide endpoint.
+    hidden_commits: set[str] = field(default_factory=set)
 
 
 class SessionRegistry:
@@ -86,3 +98,16 @@ class SessionRegistry:
     def list_all(self) -> list[Session]:
         # Newest first, to match how a "Recents" list reads.
         return list(reversed(self._sessions.values()))
+
+    def delete(self, session_id: str) -> None:
+        session = self._sessions.pop(session_id, None)
+        if session is None:
+            return
+        # deck.pptx may still be chmod 444 from artifact.protect() if a
+        # turn got interrupted mid-flight — that only blocks writing to the
+        # file itself, not removing it from a directory this process owns,
+        # but chmod it back first anyway rather than relying on that.
+        deck_path = session.directory / artifact.DECK_FILENAME
+        if deck_path.exists():
+            artifact.unprotect(deck_path)
+        shutil.rmtree(session.directory, ignore_errors=True)

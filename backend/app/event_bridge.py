@@ -35,6 +35,16 @@ class EventBridge:
         if queue in subscribers:
             subscribers.remove(queue)
 
+    def stop_session(self, session_id: str) -> None:
+        # Called when a session is deleted — without this the pump task
+        # (an infinite loop reconnecting to OpenCode's SSE stream forever)
+        # would just keep running against a directory that's about to be
+        # removed from disk.
+        pump = self._pumps.pop(session_id, None)
+        if pump is not None:
+            pump.cancel()
+        self._queues.pop(session_id, None)
+
     async def _pump(self, session_id: str, directory: Path) -> None:
       
         while True:

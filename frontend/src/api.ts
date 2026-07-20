@@ -36,6 +36,15 @@ export async function listSessions(): Promise<SessionInfo[]> {
   return response.json();
 }
 
+export async function deleteSession(sessionId: string): Promise<void> {
+  // DELETE /api/sessions/{id} -> removes the session and its working
+  // directory entirely. 409s if a turn is currently in progress for it.
+  const response = await fetch(`/api/sessions/${sessionId}`, { method: "DELETE" });
+  if (!response.ok) {
+    throw new Error(`failed to delete session: ${response.status}`);
+  }
+}
+
 export async function getMessages(sessionId: string): Promise<any[]> {
   // GET /api/sessions/{id}/messages -> OpenCode's own message history for
   // this session, raw ({info, parts}[]) — useSessionSocket replays it
@@ -88,6 +97,18 @@ export async function revertTo(sessionId: string, commit: string): Promise<{ fil
     throw new Error(`failed to revert: ${response.status}`);
   }
   return response.json();
+}
+
+export async function hideHistoryEntry(sessionId: string, commit: string): Promise<void> {
+  // POST /api/sessions/{id}/history/{hash}/hide -> a display-only filter,
+  // nothing in git is rewritten. Fails with 400 if commit is the current
+  // (HEAD) commit — the sidebar always needs one visible "Current" entry.
+  const response = await fetch(`/api/sessions/${sessionId}/history/${commit}/hide`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`failed to hide history entry: ${response.status}`);
+  }
 }
 
 export async function getThumbnails(sessionId: string): Promise<{ filenames: string[] }> {

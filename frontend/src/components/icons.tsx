@@ -79,3 +79,68 @@ export function XIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+// Clock face with a short trailing arc, read as "history" — used for the
+// version history toggle.
+export function HistoryIcon({ className }: IconProps) {
+  return (
+    <svg className={className} width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path
+        d="M13 7.5A5.5 5.5 0 1 1 7.5 2c1.9 0 3.6.95 4.6 2.4"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+      />
+      <path d="M12.5 1.8V4.6H9.7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M7.5 4.8V7.7L9.4 9.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function TrashIcon({ className }: IconProps) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <path d="M2.5 4h9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <path
+        d="M5.2 4V2.8a.8.8 0 0 1 .8-.8h2a.8.8 0 0 1 .8.8V4"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M3.6 4l.5 8a.8.8 0 0 0 .8.75h4.2a.8.8 0 0 0 .8-.75l.5-8"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <line x1="5.6" y1="6.2" x2="5.85" y2="10.8" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+      <line x1="8.4" y1="6.2" x2="8.15" y2="10.8" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function CheckCircleIcon({ className }: IconProps) {
+  return (
+    <svg className={className} width="13" height="13" viewBox="0 0 13 13" fill="none">
+      <circle cx="6.5" cy="6.5" r="5.6" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M4 6.6L5.7 8.3L9 4.9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function SpinnerIcon({ className }: IconProps) {
+  return (
+    <svg
+      className={`${className ?? ""} animate-spin`}
+      width="13"
+      height="13"
+      viewBox="0 0 13 13"
+      fill="none"
+    >
+      <circle cx="6.5" cy="6.5" r="5.3" stroke="currentColor" strokeWidth="1.2" strokeOpacity="0.25" />
+      <path d="M11.8 6.5a5.3 5.3 0 0 0-5.3-5.3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
