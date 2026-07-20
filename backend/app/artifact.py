@@ -1,21 +1,26 @@
 """
 Everything that treats a session's working directory as a slide deck:
-git-backed version history and rendering slides to images via Marp.
-Nothing here talks to OpenCode — it only operates on files already
+git-backed version history, rendering the deck to images, and the
+read-only protection that keeps the agent off the real file during a
+turn. Nothing here talks to OpenCode — it only operates on files already
 sitting in a directory.
+
+The deck is a real .pptx file. Rendering is a two-step pipeline —
+LibreOffice's own PNG export only produces one image regardless of slide
+count (confirmed directly), so this converts to PDF first, then
+rasterizes each page with PyMuPDF.
 """
 
-import re
 import subprocess
+import tempfile
 from pathlib import Path
 
-DECK_FILENAME = "slides.md"
-DECK_COPY_FILENAME = "slides_copy.md"  # scratch draft an agent's turn edits freely; see ws.py
-RENDER_DIRNAME = ".render"  # generated thumbnails — not part of the deck's own history
+import fitz  # PyMuPDF
 
-# Frontmatter is itself delimited by "---", so it has to be peeled off
-# before we can split the rest of the file into slides on the same marker.
-_FRONTMATTER_RE = re.compile(r"(?s)^---\s*\n(.*?)\n---\s*\n(.*)$")
+DECK_FILENAME = "deck.pptx"
+DECK_COPY_FILENAME = "deck_copy.pptx"  # scratch draft an agent's turn edits freely; see ws.py
+RENDER_DIRNAME = ".render"  # generated thumbnails — not part of the deck's own history
+HELPER_FILENAME = "pptx_helpers.py"  # copied into every session dir at creation; see sessions.py
 
 
 # --- version history -------------------------------------------------------
@@ -26,12 +31,15 @@ def init_repo(directory: Path) -> None:
         return
     # Generated thumbnails and the in-progress scratch draft aren't real deck
     # content — the draft only ever gets into the real history by being
-    # merged over slides.md (see ws.py's approval flow), never committed itself.
-    (directory / ".gitignore").write_text(f"{RENDER_DIRNAME}/\n{DECK_COPY_FILENAME}\n")
+    # merged over deck.pptx (see ws.py's approval flow), never committed itself.
+    # The helper script is tooling, not deck content, same reasoning.
+    (directory / ".gitignore").write_text(
+        f"{RENDER_DIRNAME}/\n{DECK_COPY_FILENAME}\n{HELPER_FILENAME}\n"
+    )
     _git(["init"], directory)
     _git(["config", "user.email", "cowork-ui@local"], directory)
     _git(["config", "user.name", "cowork-ui"], directory)
-    commit(directory, "Initial deck") # baseline snapshot of the deck
+    commit(directory, "Initial commit") # baseline — the session may not have a deck yet at all
 
 
 def commit(directory: Path, message: str) -> None:
@@ -73,17 +81,25 @@ def _git(args: list[str], cwd: Path) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
 
 
-# --- deck parsing ------------------------------------------------------------
+# --- protection ----------------------------------------------------------
 
-def parse_deck(markdown: str) -> tuple[str, list[str]]:
-    """Splits a Marp deck into its frontmatter and a list of slide bodies."""
-    # Peeling off frontmatter (first two '---' and the content wrapped in it)
-    match = _FRONTMATTER_RE.match(markdown)
-    if not match:
-        raise ValueError("deck is missing Marp frontmatter ('--- ... ---' at the top)")
-    frontmatter, body = match.groups() # body is remaining content in the markdown after frontmatter
-    slides = re.split(r"(?m)^---\s*$", body) # split on '---' markers to get slides
-    return frontmatter, [slide.strip() for slide in slides] # return frontmatter and list of slide texts
+def protect(path: Path) -> None:
+    """
+    Makes the real deck file read-only for the duration of a turn. This is
+    the actual security boundary now — OpenCode's bash permission patterns
+    do not reliably scope to a specific file. Confirmed directly: a
+    `{"permission": "bash", "pattern": "*deck.pptx*", "action": "deny"}`
+    rule, naming the exact protected filename, still let a matching
+    command through and overwrite the file. An OS-level chmod can't be
+    talked around the same way — verified against a raw bash redirect, a
+    raw Python file write, and an actual python-pptx `Presentation.save()`
+    call; all three raised a permission error, none silently succeeded.
+    """
+    path.chmod(0o444)
+
+
+def unprotect(path: Path) -> None:
+    path.chmod(0o644)
 
 
 # --- rendering ---------------------------------------------------------------
@@ -98,35 +114,64 @@ def render_deck(
     overwriting the other.
     """
     render_dir = directory / RENDER_DIRNAME
-    render_dir.mkdir(exist_ok=True)
-    _run_marp(directory / deck_filename, render_dir / f"{output_prefix}.png", cwd=directory)
-    return sorted(render_dir.glob(f"{output_prefix}.*.png"), key=_slide_number)
+    render_dir.mkdir(parents=True, exist_ok=True)
+
+    # The intermediate PDF lives in its own throwaway directory, not
+    # render_dir — soffice always names it after the source file's stem
+    # (e.g. "deck.pdf"), so two renders of the same deck running at once
+    # (e.g. two overlapping turns against one session) would otherwise
+    # collide on that exact path: one's cleanup unlinking the file out from
+    # under the other's still-in-progress read. Confirmed this exact race
+    # as the cause of a "No such file" crash during rendering. A unique
+    # work dir per call makes the collision impossible regardless of why
+    # two renders ended up running concurrently.
+    with tempfile.TemporaryDirectory() as work_dir:
+        pdf_path = _convert_to_pdf(directory / deck_filename, Path(work_dir))
+        return _rasterize_pdf(pdf_path, render_dir, output_prefix)
 
 
-def _run_marp(source: Path, output: Path, cwd: Path) -> None:
-    '''
-    the subprocess is equivalent to running the following command:
-    marp slides.md --images png -o .render/slide.png --allow-local-files
-    
-    --images png — tells Marp to render each slide as a separate PNG (as opposed to one combined PDF/HTML)
-    --allow-local-files — lets Marp load local image assets (like assets/chart.png) that the deck's markdown references — without this flag Marp blocks local file access for security reasons by default
-    '''
-    result = subprocess.run(
-        [
-            "marp", str(source.relative_to(cwd)),
-            "--images", "png",
-            "-o", str(output.relative_to(cwd)),
-            "--allow-local-files",
-        ],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        stdin=subprocess.DEVNULL,  # marp waits on stdin instead of erroring if this is left open
-    )
+def _convert_to_pdf(source: Path, work_dir: Path) -> Path:
+    # -env:UserInstallation points soffice at a throwaway profile dir —
+    # without it, two conversions running at once (e.g. two sessions
+    # rendering at the same time) collide on the shared default profile
+    # lock and one of them fails. Confirmed both the collision and the fix
+    # by running two conversions concurrently before relying on this.
+    with tempfile.TemporaryDirectory() as profile_dir:
+        result = subprocess.run(
+            [
+                "soffice", "--headless",
+                f"-env:UserInstallation=file://{profile_dir}",
+                "--convert-to", "pdf",
+                "--outdir", str(work_dir),
+                str(source),
+            ],
+            capture_output=True, text=True, stdin=subprocess.DEVNULL,
+        )
     if result.returncode != 0:
-        raise RuntimeError(f"marp render failed:\n{result.stdout}{result.stderr}")
+        raise RuntimeError(f"soffice pdf conversion failed:\n{result.stdout}{result.stderr}")
+    pdf_path = work_dir / f"{source.stem}.pdf"
+    if not pdf_path.is_file():
+        raise RuntimeError(
+            f"soffice reported success but {pdf_path.name} wasn't produced "
+            f"(stdout: {result.stdout!r}, stderr: {result.stderr!r})"
+        )
+    return pdf_path
 
 
-def _slide_number(path: Path) -> int:
-    # marp names multi-slide output "slide.001.png", "slide.002.png", ...
-    return int(path.stem.split(".")[-1])
+def _rasterize_pdf(pdf_path: Path, render_dir: Path, output_prefix: str) -> list[Path]:
+    # Clear any previous run's images under this prefix — soffice's own
+    # output name is fixed to the source's stem, but our per-slide names
+    # are prefix-based and would otherwise accumulate across renders.
+    for stale in render_dir.glob(f"{output_prefix}.*.png"):
+        stale.unlink()
+
+    doc = fitz.open(pdf_path)
+    try:
+        paths = []
+        for i, page in enumerate(doc, start=1):
+            image_path = render_dir / f"{output_prefix}.{i:03d}.png"
+            page.get_pixmap(dpi=150).save(image_path)
+            paths.append(image_path)
+        return paths
+    finally:
+        doc.close()

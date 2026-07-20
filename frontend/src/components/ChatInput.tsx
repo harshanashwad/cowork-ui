@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { uploadFile } from "../api";
 import { FileIcon, PaperclipIcon, SendIcon, XIcon } from "./icons";
 
@@ -6,18 +6,37 @@ import { FileIcon, PaperclipIcon, SendIcon, XIcon } from "./icons";
 // useSessionSocket's sendMessage) and a direct upload REST call when a
 // file is picked. disabled is set by the parent while a turn is in flight
 // or its review card hasn't been approved/rejected yet.
+//
+// A .pptx picked here is special: the backend loads it as the deck itself
+// (see api.ts's uploadFile), not a chat attachment, so it never becomes a
+// chip — onDeckImported just tells the parent to refresh the thumbnail
+// rail / version history instead.
 export function ChatInput({
   sessionId,
   onSend,
+  onDeckImported,
   disabled,
 }: {
   sessionId: string;
   onSend: (text: string, attachments: string[]) => void;
+  onDeckImported: () => void;
   disabled: boolean;
 }) {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-grows the textarea with content up to max-h-40 (see className
+  // below), then lets the textarea's own scrollbar take over — re-measured
+  // on every keystroke since height must shrink back down as text is
+  // deleted, not just grow.
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [text]);
 
   const canSend = !disabled && (text.trim().length > 0 || attachments.length > 0);
 
@@ -32,8 +51,14 @@ export function ChatInput({
     const file = e.target.files?.[0];
     e.target.value = ""; // lets the same file be picked again later
     if (!file) return;
+
+    const isDeck = file.name.toLowerCase().endsWith(".pptx");
     const { filename } = await uploadFile(sessionId, file);
-    setAttachments((prev) => [...prev, filename]);
+    if (isDeck) {
+      onDeckImported();
+    } else {
+      setAttachments((prev) => [...prev, filename]);
+    }
   };
 
   return (
@@ -47,6 +72,7 @@ export function ChatInput({
       )}
 
       <textarea
+        ref={textareaRef}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
@@ -58,7 +84,7 @@ export function ChatInput({
         disabled={disabled}
         placeholder={disabled ? "Waiting on the agent or a pending review..." : "Write a message..."}
         rows={1}
-        className="max-h-40 w-full resize-none bg-transparent text-sm text-ink placeholder-muted outline-none disabled:text-muted"
+        className="max-h-40 w-full resize-none overflow-y-auto bg-transparent text-sm text-ink placeholder-muted outline-none disabled:text-muted"
       />
 
       <div className="mt-2 flex items-center justify-between">

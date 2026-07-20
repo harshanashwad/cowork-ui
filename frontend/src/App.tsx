@@ -58,7 +58,8 @@ function App() {
 }
 
 function ChatSession({ sessionId }: { sessionId: string }) {
-  const { entries, busy, sendMessage, replyPermission } = useSessionSocket(sessionId);
+  const { entries, busy, sendMessage, replyPermission, replyQuestion, rejectQuestion, retryRender } =
+    useSessionSocket(sessionId);
   const [historyCollapsed, setHistoryCollapsed] = useState(true); // closed by default — not needed during normal editing
   // Bumped after an approved turn or a revert, so the thumbnail rail
   // re-renders the current deck instead of showing stale slides.
@@ -69,20 +70,38 @@ function ChatSession({ sessionId }: { sessionId: string }) {
     setDeckVersion((v) => v + 1);
   }, [approvedCount]);
 
-  // A pending bash permission or an unresolved turn.review card both mean
-  // "don't send another message yet" — busy alone only covers the window
-  // before either of those exists (agent still thinking, no ask yet).
-  const hasPendingApproval = entries.some((e) => e.kind === "permission" && !e.resolved);
+  // A pending bash permission, an unresolved turn.review card, an
+  // unanswered question, or a render that failed and hasn't been retried
+  // yet all mean "don't send another message yet" — busy alone only
+  // covers the window before any of those exists (agent still thinking,
+  // nothing asked yet).
+  const hasPendingApproval = entries.some(
+    (e) =>
+      (e.kind === "permission" || e.kind === "question" || e.kind === "render_failed") &&
+      !e.resolved
+  );
 
   return (
     <>
       <main className="flex min-w-0 flex-1 flex-col">
         <SlideThumbnailRail sessionId={sessionId} refreshKey={deckVersion} />
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <ActivityFeed sessionId={sessionId} entries={entries} onReplyPermission={replyPermission} />
+          <ActivityFeed
+            sessionId={sessionId}
+            entries={entries}
+            onReplyPermission={replyPermission}
+            onReplyQuestion={replyQuestion}
+            onRejectQuestion={rejectQuestion}
+            onRetryRender={retryRender}
+          />
         </div>
         <div className="mx-auto w-full max-w-3xl px-6 pb-6">
-          <ChatInput sessionId={sessionId} onSend={sendMessage} disabled={busy || hasPendingApproval} />
+          <ChatInput
+            sessionId={sessionId}
+            onSend={sendMessage}
+            onDeckImported={() => setDeckVersion((v) => v + 1)}
+            disabled={busy || hasPendingApproval}
+          />
         </div>
       </main>
       <VersionHistorySidebar

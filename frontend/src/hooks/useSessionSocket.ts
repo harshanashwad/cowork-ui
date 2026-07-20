@@ -14,6 +14,14 @@ import { getMessages } from "../api";
 
 export type PermissionPreview = { before: string[]; after: string[] };
 
+export type QuestionOption = { label: string; description: string };
+export type QuestionInfo = {
+  question: string;
+  header: string;
+  options: QuestionOption[];
+  multiple?: boolean;
+};
+
 export type FeedEntry =
   | { kind: "text"; id: string; role: "user" | "assistant"; text: string; attachments?: string[] }
   | { kind: "status"; id: string; text: string }
@@ -24,6 +32,25 @@ export type FeedEntry =
       summary: string;
       preview?: PermissionPreview;
       resolved?: string;
+    }
+  | {
+      kind: "question";
+      id: string;
+      requestId: string;
+      questions: QuestionInfo[];
+      resolved?: boolean;
+    }
+  | {
+      // The agent's edit already succeeded and is sitting in
+      // deck_copy.pptx — only rendering it for review failed. Distinct
+      // from "permission" so the UI can offer a retry instead of an
+      // approve/reject choice. resolved once a retry produces a real
+      // turn.review card for the same requestId (see handleEvent).
+      kind: "render_failed";
+      id: string;
+      requestId: string;
+      error: string;
+      resolved?: boolean;
     };
 
 export function useSessionSocket(sessionId: string) {
@@ -111,7 +138,28 @@ export function useSessionSocket(sessionId: string) {
     );
   }, []);
 
-  return { entries, busy, sendMessage, replyPermission };
+  const replyQuestion = useCallback((requestId: string, answers: string[][]) => {
+    // -> backend: {"type": "question_reply", ...} over the websocket. A
+    // question is a separate mechanism from permissions (the agent asking
+    // the user something mid-turn), with its own reply shape: one array of
+    // selected option labels per question, in order.
+    socketRef.current?.send(
+      JSON.stringify({ type: "question_reply", request_id: requestId, answers })
+    );
+  }, []);
+
+  const rejectQuestion = useCallback((requestId: string) => {
+    socketRef.current?.send(JSON.stringify({ type: "question_reject", request_id: requestId }));
+  }, []);
+
+  const retryRender = useCallback((requestId: string) => {
+    // -> backend: {"type": "retry_render", ...}. The agent's edit already
+    // succeeded and is sitting in deck_copy.pptx — this re-runs just the
+    // render-and-review step, no need to redo the edit itself.
+    socketRef.current?.send(JSON.stringify({ type: "retry_render", request_id: requestId }));
+  }, []);
+
+  return { entries, busy, sendMessage, replyPermission, replyQuestion, rejectQuestion, retryRender };
 }
 
 // --- raw OpenCode event -> feed entry ---------------------------------
@@ -182,7 +230,14 @@ function handleEvent(
     // something OpenCode sent. Shaped the same as a permission entry so it
     // renders through the same ApprovalCard with no extra UI code.
     setEntries((prev) => [
-      ...prev,
+      // If rendering failed first and this is the result of retrying it,
+      // resolve the render_failed card in place rather than leaving it
+      // dangling above the review card that superseded it.
+      ...prev.map((entry) =>
+        entry.kind === "render_failed" && entry.requestId === props.id
+          ? { ...entry, resolved: true }
+          : entry
+      ),
       {
         kind: "permission",
         id: props.id,
@@ -194,6 +249,19 @@ function handleEvent(
     return;
   }
 
+  if (event.type === "turn.render_failed") {
+    // The edit itself succeeded; only rendering the before/after preview
+    // for review failed. Upsert by requestId — a retry that fails again
+    // updates the same card's error message instead of stacking a new one.
+    upsert(setEntries, `render-failed-${props.id}`, {
+      kind: "render_failed",
+      id: `render-failed-${props.id}`,
+      requestId: props.id,
+      error: props.error,
+    });
+    return;
+  }
+
   if (event.type === "permission.replied") {
     // Resolves either a real OpenCode permission or a turn.review card —
     // both look the same here, matched purely by requestId.
@@ -201,6 +269,30 @@ function handleEvent(
       prev.map((entry) =>
         entry.kind === "permission" && entry.requestId === props.requestID
           ? { ...entry, resolved: props.reply }
+          : entry
+      )
+    );
+    return;
+  }
+
+  if (event.type === "question.asked") {
+    // The agent asking the user something mid-turn — distinct from a
+    // permission ask, with its own event/reply mechanism entirely. Without
+    // handling this, the turn just hangs forever: send_message blocks
+    // until OpenCode considers the whole turn done, and nothing ever
+    // answers the question to let that happen.
+    setEntries((prev) => [
+      ...prev,
+      { kind: "question", id: props.id, requestId: props.id, questions: props.questions ?? [] },
+    ]);
+    return;
+  }
+
+  if (event.type === "question.replied" || event.type === "question.rejected") {
+    setEntries((prev) =>
+      prev.map((entry) =>
+        entry.kind === "question" && entry.requestId === props.requestID
+          ? { ...entry, resolved: true }
           : entry
       )
     );

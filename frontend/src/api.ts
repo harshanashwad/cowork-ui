@@ -10,12 +10,20 @@ export interface SessionInfo {
 }
 
 export async function createSession(): Promise<SessionInfo> {
-  // POST /api/sessions -> FastAPI backend (proxied by Vite from /api to :8000)
+  // POST /api/sessions -> FastAPI backend (proxied by Vite from /api to :8000).
+  // Starts completely empty — no deck at all. Upload a .pptx from within
+  // the session (uploadFile below) to load one.
   const response = await fetch("/api/sessions", { method: "POST" });
   if (!response.ok) {
     throw new Error(`failed to create session: ${response.status}`);
   }
   return response.json();
+}
+
+export function exportUrl(sessionId: string): string {
+  // GET /api/sessions/{id}/export.pptx -> plain download link, no JS needed
+  // beyond building the URL (see SlideThumbnailRail.tsx).
+  return `/api/sessions/${sessionId}/export.pptx`;
 }
 
 export async function listSessions(): Promise<SessionInfo[]> {
@@ -42,6 +50,8 @@ export async function getMessages(sessionId: string): Promise<any[]> {
 export async function uploadFile(sessionId: string, file: File): Promise<{ filename: string }> {
   // POST /api/sessions/{id}/upload (multipart) -> saved straight into that
   // session's working directory, so the agent can read it immediately.
+  // A .pptx is special-cased server-side: saved as the deck itself
+  // (deck.pptx, committed as-is, no conversion), not a generic attachment.
   const body = new FormData();
   body.append("file", file);
   const response = await fetch(`/api/sessions/${sessionId}/upload`, { method: "POST", body });
@@ -67,7 +77,7 @@ export async function getHistory(sessionId: string): Promise<HistoryEntry[]> {
 }
 
 export async function revertTo(sessionId: string, commit: string): Promise<{ filenames: string[] }> {
-  // POST /api/sessions/{id}/revert -> git checkout <commit> -- slides.md,
+  // POST /api/sessions/{id}/revert -> git checkout <commit> -- deck.pptx,
   // committed as a new "Revert to ..." entry (never rewrites history).
   const response = await fetch(`/api/sessions/${sessionId}/revert`, {
     method: "POST",

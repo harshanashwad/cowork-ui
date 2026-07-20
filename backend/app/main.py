@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from app import artifact, ws
+from app import artifact, pptx_import, ws
 from app.event_bridge import EventBridge
 from app.opencode_client import OpenCodeClient
 from app.sessions import SessionRegistry
@@ -45,6 +45,8 @@ class SessionOut(BaseModel):
 
 @app.post("/api/sessions", response_model=SessionOut)
 async def create_session() -> SessionOut:
+    # Starts empty — no deck at all. Upload a .pptx from within the
+    # session (POST .../upload below) to load one.
     session = await app.state.sessions.create()
     await app.state.bridge.start_session(session.id, session.directory)
     return SessionOut(id=session.id, directory=str(session.directory), title=session.title)
@@ -109,7 +111,28 @@ async def get_thumbnails(session_id: str) -> dict[str, list[str]]:
 
 
 def _render_current(directory: Path) -> list[str]:
+    # A brand new session has no deck at all until a .pptx is uploaded —
+    # that's a normal state now, not an error, so don't even try to render.
+    if not (directory / artifact.DECK_FILENAME).is_file():
+        return []
     return [p.name for p in artifact.render_deck(directory)]
+
+
+@app.get("/api/sessions/{session_id}/export.pptx")
+async def export_pptx(session_id: str) -> FileResponse:
+    # No conversion needed — deck.pptx already is a real pptx at all times,
+    # so "export" is just serving the file as-is.
+    session = app.state.sessions.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    path = session.directory / artifact.DECK_FILENAME
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="no deck yet")
+    return FileResponse(
+        path,
+        filename="deck.pptx",
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    )
 
 
 @app.post("/api/sessions/{session_id}/upload")
@@ -120,8 +143,18 @@ async def upload_file(session_id: str, file: UploadFile) -> dict[str, str]:
     if not file.filename or "/" in file.filename:
         raise HTTPException(status_code=400, detail="invalid filename")
 
+    content = await file.read()
+
+    if file.filename.lower().endswith(".pptx"):
+        # A .pptx uploaded through the same attach button becomes the deck
+        # itself, not a generic attachment — replacing whatever was there
+        # (including nothing, for a brand new session).
+        await asyncio.to_thread(pptx_import.import_pptx, content, session.directory)
+        await asyncio.to_thread(artifact.commit, session.directory, "Imported deck")
+        return {"filename": artifact.DECK_FILENAME}
+
     dest = session.directory / file.filename
-    dest.write_bytes(await file.read())
+    dest.write_bytes(content)
     return {"filename": file.filename}
 
 

@@ -1,19 +1,26 @@
 import type { FeedEntry } from "../hooks/useSessionSocket";
 import { ApprovalCard } from "./ApprovalCard";
+import { QuestionCard } from "./QuestionCard";
 import { FileIcon } from "./icons";
 
 // Renders whatever useSessionSocket has already turned OpenCode's events
 // into. This component never touches the websocket itself — approve/reject
-// clicks call back up to onReplyPermission, which the parent wires to
-// useSessionSocket's replyPermission.
+// and question-answer clicks call back up to the parent's callbacks, wired
+// to useSessionSocket's replyPermission/replyQuestion/rejectQuestion.
 export function ActivityFeed({
   sessionId,
   entries,
   onReplyPermission,
+  onReplyQuestion,
+  onRejectQuestion,
+  onRetryRender,
 }: {
   sessionId: string;
   entries: FeedEntry[];
   onReplyPermission: (requestId: string, reply: "once" | "reject") => void;
+  onReplyQuestion: (requestId: string, answers: string[][]) => void;
+  onRejectQuestion: (requestId: string) => void;
+  onRetryRender: (requestId: string) => void;
 }) {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 px-6 py-8">
@@ -28,6 +35,29 @@ export function ActivityFeed({
 
         if (entry.kind === "status") {
           return <StatusLine key={entry.id} text={entry.text} />;
+        }
+
+        if (entry.kind === "question") {
+          return (
+            <QuestionCard
+              key={entry.id}
+              questions={entry.questions}
+              resolved={entry.resolved}
+              onSubmit={(answers) => onReplyQuestion(entry.requestId, answers)}
+              onReject={() => onRejectQuestion(entry.requestId)}
+            />
+          );
+        }
+
+        if (entry.kind === "render_failed") {
+          return (
+            <RenderFailedCard
+              key={entry.id}
+              error={entry.error}
+              resolved={entry.resolved}
+              onRetry={() => onRetryRender(entry.requestId)}
+            />
+          );
         }
 
         return (
@@ -76,4 +106,38 @@ function AssistantMessage({ text }: { text: string }) {
 
 function StatusLine({ text }: { text: string }) {
   return <p className="text-sm text-muted">{text}</p>;
+}
+
+// The agent's edit already succeeded and is sitting in deck_copy.pptx —
+// only rendering it for review failed (e.g. a soffice hiccup). Distinct
+// from ApprovalCard on purpose: there's nothing to approve/reject yet,
+// just a render to retry — retrying doesn't redo the agent's work.
+function RenderFailedCard({
+  error,
+  resolved,
+  onRetry,
+}: {
+  error: string;
+  resolved?: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="self-start rounded-2xl border border-red-200 bg-red-50 p-5">
+      <p className="text-sm font-medium text-ink">Failed to render the review preview</p>
+      <p className="mt-1 text-sm text-muted">{error}</p>
+      <p className="mt-2 text-xs text-muted">
+        Your edit was applied — only generating the before/after preview failed.
+      </p>
+      {resolved ? (
+        <p className="mt-4 text-sm text-muted">Retried — review card above.</p>
+      ) : (
+        <button
+          onClick={onRetry}
+          className="mt-4 rounded-md bg-accent px-3.5 py-1.5 text-sm text-white hover:bg-accent-hover"
+        >
+          Retry rendering
+        </button>
+      )}
+    </div>
+  );
 }

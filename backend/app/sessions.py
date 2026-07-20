@@ -11,23 +11,25 @@ from app import artifact
 from app.opencode_client import OpenCodeClient
 
 WORKDIRS_ROOT = Path(__file__).resolve().parents[1] / "workdirs"
-SAMPLE_DECK = Path(__file__).resolve().parents[1] / "sample_deck"
+# pptx_helpers.py lives alongside this module in the backend source tree —
+# copied into each new session directory so the agent can run it via bash.
+HELPER_SOURCE = Path(__file__).resolve().parent / artifact.HELPER_FILENAME
 
 PROVIDER_ID = "opencode"
 MODEL_ID = "hy3-free"  # OpenCode Zen's free tier
 
-# The real deck file is never editable directly — an agent's turn edits a
-# scratch copy freely instead, reviewed and merged as a whole once the turn
-# finishes (see ws.py). Bash is still asked individually, same as before.
-#
-# Patterns must be globs, not bare filenames — a plain "slides.md" silently
-# fails to match anything (OpenCode falls through to its own implicit
-# default-allow rule), confirmed by testing a denied edit directly against
-# the running server before trusting this.
+# deck.pptx is binary, so OpenCode's edit tool can't touch it anyway — the
+# agent edits deck_copy.pptx via bash + python-pptx instead (see ws.py).
+# bash runs unrestricted here: OpenCode's bash permission patterns don't
+# reliably scope to a specific file (confirmed directly — a deny rule
+# naming the exact protected filename still let a matching command
+# through), so gating bash per-call would add mid-turn interruptions
+# without actually protecting anything. The real protection is
+# artifact.protect(), which makes deck.pptx read-only at the OS level for
+# the duration of a turn — that can't be talked around the way the
+# permission pattern could.
 PERMISSION_RULESET = [
-    {"permission": "edit", "pattern": f"**/{artifact.DECK_FILENAME}", "action": "deny"},
-    {"permission": "edit", "pattern": f"**/{artifact.DECK_COPY_FILENAME}", "action": "allow"},
-    {"permission": "bash", "pattern": "*", "action": "ask"},
+    {"permission": "bash", "pattern": "*", "action": "allow"},
 ]
 
 
@@ -38,6 +40,19 @@ class Session:
     # Both are identifiers pointing to the same thing. But /events needs the directory whereas other endpoints need the id too.
     title: str # placeholder display label for the sidebar — sequential for now, not persisted across restarts
 
+    # Turn state lives here, on the Session itself, rather than in a dict
+    # scoped to one websocket connection (see ws.py). It has to survive a
+    # reconnect: a browser tab closing/reopening mid-turn opens a *second*
+    # websocket onto the same session, and if that second connection got its
+    # own fresh "busy: False" it could fire a second concurrent turn against
+    # the same deck_copy.pptx while the first (orphaned) turn is still
+    # running — confirmed as the actual cause of a render step crashing on
+    # a missing intermediate file (two renders racing on the same directory).
+    busy: bool = False
+    pending_review: str | None = None
+    pending_preview: dict[str, list[str]] | None = None
+    render_error: dict[str, str] | None = None
+
 
 class SessionRegistry:
     def __init__(self, client: OpenCodeClient) -> None:
@@ -45,9 +60,15 @@ class SessionRegistry:
         self._sessions: dict[str, Session] = {}  # insertion order == creation order
 
     async def create(self) -> Session:
+        # Starts completely empty — no deck at all. The user uploads a
+        # .pptx from within the session (the same attach button used for
+        # any other file; see main.py's upload endpoint) to load one.
         directory = WORKDIRS_ROOT / f"session-{uuid.uuid4().hex[:8]}"
-        shutil.copytree(SAMPLE_DECK, directory)  # every session starts from the same demo deck
+        directory.mkdir(parents=True)
         artifact.init_repo(directory)
+        # So the agent can call list_shape_bounds() via bash before placing
+        # a new shape, instead of guessing overlap from the pptx internals.
+        shutil.copy(HELPER_SOURCE, directory / artifact.HELPER_FILENAME)
 
         opencode_session = await self._client.create_session(
             directory=directory,

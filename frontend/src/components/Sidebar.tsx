@@ -4,7 +4,9 @@ import { ChevronRightIcon, PlusIcon, SidebarToggleIcon } from "./icons";
 
 // The only REST call this component makes directly: GET /api/sessions,
 // to populate "Recents". Session creation and switching are handled by
-// the parent (App.tsx already owns which session is active).
+// the parent (App.tsx already owns which session is active). Loading a
+// presentation happens inside a session via the chat input's attach
+// button, not here — see ChatInput.tsx.
 export function Sidebar({
   collapsed,
   onToggleCollapsed,

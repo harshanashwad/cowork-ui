@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getThumbnails } from "../api";
+import { exportUrl, getThumbnails } from "../api";
 
 // Spatial navigation within the current deck's content — unrelated to
 // version history. Always shows whatever's currently on disk; refreshKey
@@ -17,20 +17,38 @@ export function SlideThumbnailRail({ sessionId, refreshKey }: { sessionId: strin
 
   if (filenames.length === 0) return null;
 
-  const renderUrl = (filename: string) => `/api/sessions/${sessionId}/render/${filename}`;
+  // render_deck() always writes the same filenames ("slide.001.png", ...)
+  // for the thumbnail rail specifically, unlike the review cards' unique
+  // per-turn names — so the <img src> string never changes between renders
+  // and the browser never re-fetches at all, no matter what cache headers
+  // say, since no new request is even issued. ?v= forces a new URL every
+  // time the deck might have changed.
+  const renderUrl = (filename: string) => `/api/sessions/${sessionId}/render/${filename}?v=${refreshKey}`;
 
   return (
     <>
-      <div className="flex shrink-0 gap-2 overflow-x-auto border-b border-border bg-canvas px-6 py-3">
-        {filenames.map((name, index) => (
-          <button
-            key={name}
-            onClick={() => setSelected(name)}
-            className="shrink-0 overflow-hidden rounded-md border border-border transition-shadow hover:shadow-md"
-          >
-            <img src={renderUrl(name)} alt={`Slide ${index + 1}`} className="h-16 w-auto" />
-          </button>
-        ))}
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-canvas px-6 py-3">
+        <div className="flex gap-2 overflow-x-auto">
+          {filenames.map((name, index) => (
+            <button
+              key={name}
+              onClick={() => setSelected(name)}
+              className="shrink-0 overflow-hidden rounded-md border border-border transition-shadow hover:shadow-md"
+            >
+              <img src={renderUrl(name)} alt={`Slide ${index + 1}`} className="h-16 w-auto" />
+            </button>
+          ))}
+        </div>
+        {/* Lives here for layout convenience (this is the only persistent
+            chrome around "the current deck") — not conceptually part of
+            thumbnail navigation. */}
+        <a
+          href={exportUrl(sessionId)}
+          download
+          className="shrink-0 text-xs font-medium text-muted hover:text-ink"
+        >
+          Export .pptx
+        </a>
       </div>
 
       {selected && (

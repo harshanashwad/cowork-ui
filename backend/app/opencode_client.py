@@ -115,6 +115,26 @@ class OpenCodeClient:
         )
         response.raise_for_status()
 
+    async def reply_question(
+        self, request_id: str, directory: Path, answers: list[list[str]]
+    ) -> None:
+        # A question is the agent asking the user something mid-turn — a
+        # separate mechanism from permissions, with its own reply shape:
+        # one array of selected option labels per question, in order.
+        response = await self._http.post(
+            f"/question/{request_id}/reply",
+            params={"directory": str(directory)},
+            json={"answers": answers},
+        )
+        response.raise_for_status()
+
+    async def reject_question(self, request_id: str, directory: Path) -> None:
+        response = await self._http.post(
+            f"/question/{request_id}/reject",
+            params={"directory": str(directory)},
+        )
+        response.raise_for_status()
+
     async def events(self, directory: Path) -> AsyncIterator[dict[str, Any]]:
         """
         Yields events scoped to one working directory. OpenCode's /event
