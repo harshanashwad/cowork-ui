@@ -110,19 +110,18 @@ command it runs or file it touches (click one to expand and see exactly
 what it did, if you're curious). A few concrete things worth trying
 against the demo deck, each exercising something different:
 
-- **Tone/content rewrite** — *"Rewrite the Executive Summary on slide 3
-  to sound more confident and investor-facing, without changing the
-  actual numbers."*
+- **Tone/content rewrite** — *"Rewrite the Executive Summary on slide 3*  
+*to sound more confident and investor-facing, replace the bullets with 2 crisp paras"*
 - **Image move + shape-targeting** — *"Move the photo on slide 7 to the
-  right side of the slide, and expand the text next to it to also
-  mention our new hire onboarding program."*
+right side of the slide, and expand the text next to it to also
+mention our new hire onboarding program."*
 - **Table edit** — *"Add a new row to the Customer Highlights table on
-  slide 8 for a customer called Norwood Logistics, with plausible values
-  matching the other rows."*
+slide 8 for a customer called Norwood Logistics, with plausible values
+matching the other rows."*
 - **Structural, cross-slide edit** — *"Split slide 9's risks into two
-  separate slides — one for supply chain risks, one for everything else
-  — expand some content on both slides — and update the agenda on
-  slide 2 to reflect the new slide count."*
+separate slides — one for supply chain risks, one for everything else
+— expand some content on both slides — and update the agenda on
+slide 2 to reflect the new slide count."*
 
 **4. Review the change.** When the agent finishes, a review card appears
 with the affected slide(s) rendered before and after, side by side.
