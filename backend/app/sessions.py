@@ -15,8 +15,17 @@ WORKDIRS_ROOT = Path(__file__).resolve().parents[1] / "workdirs"
 # copied into each new session directory so the agent can run it via bash.
 HELPER_SOURCE = Path(__file__).resolve().parent / artifact.HELPER_FILENAME
 
+# Model has been through several swaps while chasing something reliable:
+# hy3-free (OpenCode Zen) was retired by the provider outright
+# (ProviderModelNotFoundError); north-mini-code-free (also Zen) was too
+# slow to make real progress on a turn; gpt-4o-mini (OpenAI, via
+# OPENAI_API_KEY loaded into the OpenCode subprocess's env — see
+# opencode_client.py) ran fine but didn't reliably follow the exact
+# filename instructions in ws.py's SYSTEM_PROMPT (renamed deck_copy.pptx
+# to a name of its own choosing instead of leaving it in place). Currently
+# trying opencode/big-pickle (Zen) next.
 PROVIDER_ID = "opencode"
-MODEL_ID = "hy3-free"  # OpenCode Zen's free tier
+MODEL_ID = "big-pickle"
 
 # deck.pptx is binary, so OpenCode's edit tool can't touch it anyway — the
 # agent edits deck_copy.pptx via bash + python-pptx instead (see ws.py).
